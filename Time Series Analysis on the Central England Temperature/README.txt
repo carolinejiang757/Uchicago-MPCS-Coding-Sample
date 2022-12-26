@@ -2,5 +2,5 @@
 The pdf file
 ====DATA====
 The txt file
-====Code====
+====CODE====
 The rmd file

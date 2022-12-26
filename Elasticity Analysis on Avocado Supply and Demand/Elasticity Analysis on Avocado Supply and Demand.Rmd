@@ -1,0 +1,451 @@
+---
+title: "Elasticity Analysis on Avocado Supply and Demand"
+author: "Hanchun Jiang"
+date: "2021/11/10"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r message=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(lubridate)
+library(scales)
+```
+
+```{r}
+options(scipen=0, digits=7)
+```
+
+```{r}
+avocado <- read_csv("https://raw.github.com/carolinejiang757/Elasticity-Analysis-of-Avocado-Supply-and-Demand/main/avocado.csv")
+```
+*The codes can be found at: https://github.com/carolinejiang757/Elasticity-Analysis-of-Avocado-Supply-and-Demand
+
+## 1. Data Cleaning
+
+**Do any data cleaning you think appropriate on the data set and report
+any changes to the data that you make and why you made those changes.**
+
+There are two main aspects of the raw data set that can be improved:
+region and type. The original "region" column contains regions of
+different levels, and the "type" column prevents me from analyzing the
+two types together. Therefore, I made the following changes and made new
+data sets:
+
+**avocado:**
+
+The original data set. A column "year" is added to store the year value
+of a particular data entry.
+
+**US:**
+
+As the region values in the "region" column contain regions of different
+level, I made the "US" data set specific to data with region value
+"TotalUS".
+
+**wei_avocado:**
+
+As there is a type column in the original data frame, I made a weighted
+full data frame where "volume" is the total volume of different types,
+and "price" is the weighted price over two types.
+
+**wei_US:**
+
+As the region values in the "region" column contain regions of different
+level, I broke "wei_avocado" into smaller data frames according to
+region level. "wei_US" is the data frame for weighted national data.
+
+**wei_big_region:**
+
+This data set contains weighted data of big regions (defined as regions
+larger than a state).
+
+**wei_small_region:**
+
+This data set contains weighted data of small regions (defined as
+regions smaller than or equal to a state).
+
+```{r}
+avocado <-
+  avocado %>% 
+  rename(
+    date = Date,
+    avg_price = AveragePrice,
+    total_volume = `Total Volume`,
+    total_bags = `Total Bags`,
+    small_bags = `Small Bags`,
+    large_bags = `Large Bags`,
+    xl_bags = `XLarge Bags`
+    ) %>% 
+  mutate(date = ymd(date), year = year(date))
+```
+
+```{r}
+US <- filter(avocado, region == "TotalUS")
+```
+
+```{r include=FALSE}
+unique(avocado$region)
+```
+
+```{r message=FALSE}
+wei_avocado <- 
+  avocado %>% group_by(region, date) %>%
+      summarise(
+                volume = sum(total_volume), 
+                price = weighted.mean(avg_price, total_volume),
+                year = year(date)
+                )
+```
+
+```{r}
+wei_avocado <- wei_avocado[-seq(1, nrow(wei_avocado), 2),]
+```
+
+```{r}
+wei_US <- filter(wei_avocado, region == "TotalUS")
+wei_big_region <- filter(wei_avocado, region %in% c("West", "Midsouth", "Northeast", "SouthCentral", "SouthEast", "GreatLakes", "NorthernNewEngland", "Plains"))
+wei_small_region <- filter(wei_avocado, !region %in% c("West", "Midsouth", "Northeast", "SouthCentral", "SouthEast", "GreatLakes", "NorthernNewEngland", "Plains", "TotalUS"))
+```
+
+## 
+
+## 2. Three Figures
+
+**Create three figures that collectively do the best job of describing
+and summarizing the data, i.e., after seeing your three figures, I
+should say, "ok, now i understand the basic patterns in the avocado
+market."**
+
+### 1) Volume, Region and Time
+
+This figure shows how the total volume of avocado consumed in the US
+fluctuates over time. It also shows the composition of the total volume
+by regions, given a certain time.
+
+```{r}
+ggplot(wei_big_region, aes(fill=region, y=volume, x=date, width = 7)) + 
+    geom_bar(position="stack", stat="identity") +
+   scale_y_continuous(
+    name = "Total Volume US", labels = label_number(suffix = " M", scale = 1e-6)) +
+  ggtitle("US Avocado Total Volume over Time, by Regions")
+```
+
+### 
+
+### 2) Price, Type, and Time
+
+This figure shows how the price of conventional and organic avocado in
+the US fluctuates over time. It also shows the comparison of
+conventional and organic avocado prices, given a certain time.
+
+```{r message=FALSE}
+colors <- c("Conventional" = "black", "Organic" = "red")
+ggplot(US, aes(x = date, y = avg_price)) +
+  geom_line(data = filter(US, type == "conventional"), aes(color = "Conventional")) +
+  geom_line(data = filter(US, type == "organic"), aes(color = "Organic")) +
+  ggtitle("US Avocado Price over Time, by Types") +
+  labs(y = "Average Price",colour = "") +
+  scale_color_manual(values = colors)
+```
+
+### 
+
+### 3) Volume, Type and Time
+
+This figure shows how the volume of conventional and organic avocado in
+the US fluctuates over the four years.
+
+\*Please note the conventional type corresponds to the left Y axis, and
+the organic type corresponds to the right Y axis.
+
+```{r}
+coef1 <- 20
+US02 <- mutate(US, total_volume = case_when(type == "organic" ~ total_volume * coef1, TRUE ~ total_volume))
+ggplot(US02,
+       aes(x = factor(year), y = total_volume, fill = type)) + 
+  geom_boxplot() +
+  scale_y_continuous(
+    name = "Conventional Volume", labels = label_number(suffix = " M", scale = 1e-6),
+    sec.axis = sec_axis(~./coef1, name = "Organic Volume", labels = label_number(suffix = " M", scale = 1e-6))
+  ) +
+  ggtitle("US Avocado Volume over Years, by Types")
+```
+
+## 
+
+## 3. Run Regressions
+
+**Run 1) time series, 2) cross-section, and 3) panel data regressions
+with the log quantity of avocados as the left hand side variable and the
+log price of avocados as the right hand side variable. Don't include any
+extra control variables, other than year dummies and geographic dummies
+if appropriate for the particular regression you are running.  Discuss
+the coefficients you obtain. How would you describe what those
+coefficients are in words?  How do they relate to economic parameters
+people care about? Would you say the time series variation and the
+cross-sectional variation are more driven by fluctuations in supply
+factors or demand factors?**
+
+### 1) Time Series
+
+Time series data frame is the "wei_US" data frame created in Q1. It
+shows how price and volume of avocado change over time in the US.
+
+Time series data frame:
+
+```{r}
+wei_US
+```
+
+Time series regression:
+
+```{r}
+summary(
+  lm(data = wei_US
+     , log(volume) ~ log(price) + factor(year)
+  )
+)
+```
+
+### 
+
+### 2) Cross Sectional
+
+Cross sectional data frame is created as the follows. It compresses the
+time dimension using average values, and shows how price and volume of
+avocado differ in different small regions.
+
+Cross sectional data frame:
+
+```{r}
+cross <- wei_small_region %>%
+      group_by(region) %>%
+      summarise(volume = mean(volume), price = mean(price) )
+cross
+```
+
+Cross sectional regression:
+
+```{r}
+summary(
+  lm(data = cross, log(volume) ~ log(price))
+)
+```
+
+### 
+
+### 3) Panel Data
+
+Panel data frame is the "wei_small_region" data frame created in Q1. It
+shows how price and volume of avocado change with two variables: time
+and region.
+
+Panel data frame:
+
+```{r}
+wei_small_region
+```
+
+Panel data regression:
+
+```{r}
+summary(
+  lm(data = wei_small_region, log(volume) ~ log(price) + year + region
+  )
+)
+```
+
+### 
+
+### 4) Interpretation
+
+Coefficient for log(price) means how much log(volume) changes when
+log(price) changes in one unit. This shows elasticity of the volume of
+avocado over price change, though it's yet not clear whether this is
+supply or demand elasticity.
+
+Coefficient for the years means how log(volume) differs when in
+different years. This shows how volumes of avocados are inherently
+different between different years, due to varied demand and supply over
+the years.
+
+Coefficient for the regions means how log(volume) differs when in
+different regions. This shows how volumes of avocados are inherently
+different between different regions, due to varied demand and supply
+between different regions.
+
+### 
+
+I think time series variation is more driven by supply. Looking at the
+graph in Q4, which illustrates time series variation of volume and
+price, I find that most of the times volume and price are moving in
+opposite directions, indicating the impact of supply (more supply, lower
+price; less supply, higher price).
+
+Cross sectional variation, on the other hand, is more driven by demand.
+Intuitively, besides regions where avocados are harvested, the amount of
+avocodos transported and sold in each city is mainly determined by the
+prediction of the demand for avocado in that city.
+
+## 
+
+## 4&6. Elasticity of Supply and Graph
+
+**The department of agriculture wants your best estimate of the
+elasticity of supply. Run whatever regression you think best gets at
+that.**
+
+**Explain why you made these choices. What estimate would you give for
+the elasticity of supply? How confident are you in your estimate, i.e.
+what standard error band would you put around your estimate? Make a
+graph that best explains your finding.**
+
+In the following graph, I found an area where volume and price are both
+decreasing (red area). As volume and price are moving in the same
+directions, this indicates a demand shock. Intuitively, this period
+(2016-12-4 to 2016-12-18) is the period when people are preparing for
+the Christmas, and as avocado is not among the traditional ingredients
+for Christmas, and people tend to buy the its substitute goods, the
+demand for avocado decreased, which caused a demand shock.
+
+```{r message=FALSE}
+Sys.setlocale("LC_TIME", "English")
+```
+
+```{r}
+coef <- 10.5^7
+
+ggplot() +
+  geom_line(data = filter(wei_US, date >= as.Date("2016-6-1") & date <= as.Date("2017-6-1")), 
+            aes(y = volume,x = date)) +
+  geom_line(data = filter(wei_US, date >= as.Date("2016-6-1") & date <= as.Date("2017-6-1")), 
+            aes(y = price * coef, x = date)) + 
+  scale_y_continuous(
+    name = "Volume", labels = label_number(suffix = " M", scale = 1e-6),
+    sec.axis = sec_axis(~./coef, name = "Price")
+  ) +
+  geom_rect(aes(xmin = as.Date("2016-12-4"), xmax = as.Date("2016-12-18"), ymin=-Inf, ymax=Inf), fill = "red", alpha = 0.15) +
+  geom_rect(aes(xmin = as.Date("2016-11-15"), xmax = as.Date("2017-1-15"), ymin=-Inf, ymax=Inf), fill = "blue", alpha = 0.15) +
+  ggtitle("US Avocado Volume and Price over Time")
+```
+
+By running regression over the two months surrounding this demand shock
+(blue area), and making a dummy variable which is "0" when not during
+the shock and "1" when during the shock, I found out the change of
+volume due to the shock by looking at the coefficient for the dummy. The
+change of volume is -0.13540. Please note that this coefficient is not
+very significant with a p value of 0.1, because this is a slight demand
+shock, which caused a slight change in price and lasted for a short
+period of time. However, this demand shock is already the most
+significant one compared to other periods of time, as it is the longest
+time span when volume and price are moving in the same direction.
+
+```{r}
+supply_elas <- filter(wei_US, date >= as.Date("2016-11-15") & date <= as.Date("2017-1-15"))
+
+supply_elas <- mutate(supply_elas, shock = case_when(
+  date %in% c(as.Date("2016-12-04"), as.Date("2016-12-11"), as.Date("2016-12-18")) ~ "1",
+  TRUE ~ "0")
+) 
+```
+
+```{r}
+summary(
+  lm(data = supply_elas, 
+     log(volume) ~ log(price) + shock
+  ))
+```
+
+I also need to find out the change of price caused by the shock. The
+average price not during the shock minus the average price during the
+shock is 0.075. Deviding the change of volume by the change of price, I
+get the supply elasticity, which is 0.557.
+
+```{r}
+ (mean(filter(supply_elas, shock == "0")$price) - mean(filter(supply_elas, shock == "1")$price))/0.13540
+```
+
+The standard error given by the regression is 0.07. The actual standard
+error should be higher due to many factors in reality not being ideal
+(such as measurement error), and also due to the fact that the
+coefficient is divided by another estimate (i.e. estimate for the change
+in price). I will report a 0.2 standard error.
+
+## 
+
+## 5&6. Elasticity of Demand and Graph
+
+**The department of agriculture wants your best estimate of the
+elasticity of demand. Run whatever regression you think best gets at
+that.**
+
+**Explain why you made these choices. What estimate would you give for
+the elasticity of demand? How confident are you in your estimate, i.e.
+what standard error band would you put around your estimate? Make a
+graph that best explains your finding.**
+
+In the following graph, I marked a drastic volume decrease and
+corresponding price increase with the red line and the shaded area. As
+volume and price are moving in the opposite directions, this indicates a
+supply shock.
+
+The news below also confirms that the marked area indicates a supply
+shock in around November, 2016 caused by a strike in Mexico and a
+drought in California.
+
+[\<https://www.forbes.com/sites/geoffwilliams/2016/10/31/how-the-avocado-shortage-is-affecting-chipotle-grocers-and-you/?sh=7344b52b5475>](https://www.forbes.com/sites/geoffwilliams/2016/10/31/how-the-avocado-shortage-is-affecting-chipotle-grocers-and-you/?sh=7344b52b5475){.uri}
+
+```{r}
+coef <- 10.5^7
+
+ggplot() +
+  geom_line(data = wei_US, aes(y = volume,x = date)) +
+  geom_line(data = wei_US, aes(y = price * coef, x = date)) + 
+  scale_y_continuous(
+    name = "Volume", labels = label_number(suffix = " M", scale = 1e-6),
+    sec.axis = sec_axis(~./coef, name = "Price")
+  ) +
+  geom_vline(xintercept = as.Date("2016-11-1"), color = "red", linetype = "dashed") +
+  geom_rect(aes(xmin = as.Date("2016-9-1"), xmax = as.Date("2016-11-10"), ymin=-Inf, ymax=Inf), fill = "red", alpha = 0.15) +
+  ggtitle("US Avocado Volume and Price over Time")
+```
+
+By running regression on this supply shock period, I found the demand
+elasticity over price is -1.60877.
+
+```{r}
+demand_elas <- filter(wei_US, as.Date("2016-9-1") <= date & date <= as.Date("2016-11-10"))
+summary(
+  lm(data = demand_elas, log(volume) ~ log(price)
+  )
+)
+```
+
+The standard error given by the regression is 0.12635. The actual
+standard error should be higher due to many factors in reality not being
+ideal, such as measurement error. I will report a 0.2 standard error.
+
+## 
+
+### 7. Advice on Data Collection
+
+As the most difficult and time consuming part during the data analysis
+process is distinguishing the impact of supply from the impact of
+demand, the Department of Agriculture should perform data collection in
+ways that distinguish supply from demand.
+
+Advice: For total US data, the Department of Agriculture should collect
+data on how much avocados are produced, imported and exported in the US.
+For regional data, they should collect data on how much avocados are
+produced, transported into the region, and exported from the region. In
+this way, the supply of avocado could be calculated, and it will be
+easier to perform analysis related to supply and demand.
